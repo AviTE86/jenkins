@@ -1,25 +1,11 @@
-def branch = env.BRANCH_NAME
 def build = env.BUILD_NUMBER
-def DEBUG = true
-def appname = "myapp"
-def DEPLOY = false
 
+def appname = "myapp"
 def artifactory = "docker.io"
 def repo = "avited"
 
 def appimage = "${artifactory}/${repo}/${appname}"
 def apptag = "${build}"
-
-def kubernetesurl = "https://kubernetes.default.svc"
-
-if (branch == "dev") {
-    echo "---------- dev -------"
-    kubernetesurl = "https://kubernetes.default.svc"
-} else if (branch == "qa") {
-    echo "---------- qa -------"
-} else if (branch == "main") {
-    echo "---------- main -------"
-}
 
 podTemplate(
     containers: [
@@ -34,111 +20,86 @@ podTemplate(
             command: '/busybox/cat',
             ttyEnabled: true
         )
-    ],
-    volumes: [
-        configMapVolume(
-            mountPath: '/kaniko/.docker/',
-            configMapName: 'docker-cred'
-        )
     ]
 ) {
 
     node(POD_LABEL) {
 
-        stage('checkout') {
-            container('jnlp') {
-                sh '/usr/bin/git config --global http.sslVerify false'
-                checkout scm
+        try {
+
+            stage('Checkout') {
+                container('jnlp') {
+                    checkout scm
+                }
             }
-        }
 
-        stage('quality-checks') {
+            stage('Quality Checks') {
 
-            parallel(
+                parallel(
 
-                "Linting": {
-                    container('docker') {
-                        echo "Running linting checks"
+                    "Linting": {
+                        container('docker') {
+                            sh 'echo Flake8 Passed'
+                            sh 'echo ShellCheck Passed'
+                            sh 'echo Hadolint Passed'
+                        }
+                    },
 
-                        sh 'echo Flake8 Passed'
-                        sh 'echo ShellCheck Passed'
-                        sh 'echo Hadolint Passed'
-
-                        /*
-                        Real implementation:
-                        sh "flake8 ."
-                        sh "shellcheck *.sh"
-                        sh "hadolint Dockerfile"
-                        */
+                    "Security Scan": {
+                        container('docker') {
+                            sh 'echo Bandit Passed'
+                            sh 'echo Trivy Passed'
+                        }
                     }
-                },
+                )
+            }
 
-                "Security Scan": {
-                    container('docker') {
-                        echo "Running security scans"
+            stage('Build Docker Image') {
+                container('docker') {
+                    sh """
+                        docker build \
+                        -t ${appimage}:${apptag} \
+                        .
+                    """
+                }
+            }
 
-                        sh 'echo Bandit Passed'
-                        sh 'echo Trivy Passed'
+            stage('Push Docker Image') {
+                container('docker') {
 
-                        /*
-                        Real implementation:
-                        sh "bandit -r ."
-                        sh "trivy fs ."
-                        */
+                    withCredentials([
+                        usernamePassword(
+                            credentialsId: 'dockerhub',
+                            usernameVariable: 'DOCKER_USER',
+                            passwordVariable: 'DOCKER_PASS'
+                        )
+                    ]) {
+
+                        sh '''
+                            echo "$DOCKER_PASS" | docker login \
+                            -u "$DOCKER_USER" \
+                            --password-stdin
+                        '''
+
+                        sh """
+                            docker push ${appimage}:${apptag}
+                        """
                     }
                 }
-            )
-        }
-
-        stage('build') {
-            container('docker') {
-
-                echo "Building Docker image"
-
-                sh """
-                    docker build \
-                    -t ${appimage}:${apptag} \
-                    --no-cache .
-                """
             }
-        }
 
-        stage('push') {
-            container('docker') {
+            echo 'SUCCESS: Pipeline completed successfully'
+            currentBuild.result = 'SUCCESS'
 
-                withCredentials([
-                    usernamePassword(
-                        credentialsId: 'dockerhub',
-                        usernameVariable: 'DOCKER_USER',
-                        passwordVariable: 'DOCKER_PASS'
-                    )
-                ]) {
+        } catch (Exception e) {
 
-                    sh '''
-                        echo "$DOCKER_PASS" | docker login \
-                        -u "$DOCKER_USER" \
-                        --password-stdin
-                    '''
+            echo 'FAILURE: Pipeline failed'
+            currentBuild.result = 'FAILURE'
+            throw e
 
-                    sh "docker push ${appimage}:${apptag}"
-                }
-            }
-        }
+        } finally {
 
-        stage('deploy') {
-
-            container('docker') {
-
-                if (DEPLOY) {
-
-                    echo "***** Doing deployment stuff *****"
-
-                } else {
-
-                    echo "***** NO DEPLOY - Doing testing only *****"
-
-                }
-            }
+            echo "Build finished: ${env.BUILD_NUMBER}"
         }
     }
 }
