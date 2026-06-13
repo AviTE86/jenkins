@@ -27,9 +27,10 @@ podTemplate(
 
         try {
 
-            stage('Checkout') {
+            stage('Clone Repository') {
                 container('jnlp') {
-                    checkout scm
+                    git branch: 'main',
+                        url: 'https://github.com/AviTE86/Helm-Project.git'
                 }
             }
 
