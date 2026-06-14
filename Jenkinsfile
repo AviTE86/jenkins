@@ -16,7 +16,7 @@ podTemplate(
         ),
         containerTemplate(
             name: 'docker',
-            image: 'docker:dind',
+            image: 'docker:26-dind',
             command: '/busybox/cat',
             ttyEnabled: true
         )
