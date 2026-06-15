@@ -1,6 +1,6 @@
 def build = env.BUILD_NUMBER
 
-def appname = "myapp"
+def appname = "flask-aws-monitor"
 def artifactory = "docker.io"
 def repo = "avited"
 
@@ -16,8 +16,9 @@ podTemplate(
         ),
         containerTemplate(
             name: 'docker',
-            image: 'docker:26-dind',
-            command: '/busybox/cat',
+            image: 'docker:26-cli',
+            command: 'sleep',
+            args: '99d',
             ttyEnabled: true
         )
     ]
@@ -35,7 +36,6 @@ podTemplate(
             }
 
             stage('Quality Checks') {
-
                 parallel(
 
                     "Linting": {
@@ -60,6 +60,7 @@ podTemplate(
                     sh """
                         docker build \
                         -t ${appimage}:${apptag} \
+                        -t ${appimage}:latest \
                         .
                     """
                 }
@@ -80,22 +81,19 @@ podTemplate(
                             echo "$DOCKER_PASS" | docker login \
                             -u "$DOCKER_USER" \
                             --password-stdin
-                        '''
 
-                        sh """
-                            docker push ${appimage}:${apptag}
-                        """
+                            docker push '"${appimage}:${apptag}"'
+                            docker push '"${appimage}:latest"'
+                        '''
                     }
                 }
             }
 
             echo 'SUCCESS: Pipeline completed successfully'
-            currentBuild.result = 'SUCCESS'
 
         } catch (Exception e) {
 
             echo 'FAILURE: Pipeline failed'
-            currentBuild.result = 'FAILURE'
             throw e
 
         } finally {
